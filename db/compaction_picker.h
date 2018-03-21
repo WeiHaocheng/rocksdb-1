@@ -86,6 +86,8 @@ class CompactionPicker {
   // Returns true if any one of the specified files are being compacted
   bool AreFilesInCompaction(const std::vector<FileMetaData*>& files);
 
+  bool AreFilesWithSlice(const std::vector<FileMetaData*>& files);
+
   // Takes a list of CompactionInputFiles and returns a (manual) Compaction
   // object.
   //
@@ -97,6 +99,12 @@ class CompactionPicker {
                            int output_level, VersionStorageInfo* vstorage,
                            const MutableCFOptions& mutable_cf_options,
                            uint32_t output_path_id);
+
+  Compaction* MergeFileSlices(
+    MergeTask& merge_task,
+    int output_level,
+    VersionStorageInfo* vstorage, const MutableCFOptions& mutable_cf_options,
+    const ImmutableCFOptions& ioptions);
 
   // Converts a set of compaction input file numbers into
   // a list of CompactionInputFiles.

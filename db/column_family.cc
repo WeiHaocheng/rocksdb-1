@@ -324,16 +324,18 @@ void SuperVersion::Cleanup() {
     to_delete.push_back(m);
   }
   current->Unref();
+  merge_tasks->Unref();
 }
 
 void SuperVersion::Init(MemTable* new_mem, MemTableListVersion* new_imm,
-                        Version* new_current) {
+                        Version* new_current, MergeTaskSet* new_merge_tasks) {
   mem = new_mem;
   imm = new_imm;
   current = new_current;
   mem->Ref();
   imm->Ref();
   current->Ref();
+  merge_tasks->Ref();
   refs.store(1, std::memory_order_relaxed);
 }
 
@@ -385,7 +387,8 @@ ColumnFamilyData::ColumnFamilyData(
       pending_flush_(false),
       pending_compaction_(false),
       prev_compaction_needed_bytes_(0),
-      allow_2pc_(db_options.allow_2pc) {
+      //allow_2pc_(db_options.allow_2pc) {
+      allow_2pc_(true) {
   Ref();
 
   // Convert user defined table properties collector factories to internal ones.
@@ -433,6 +436,8 @@ ColumnFamilyData::ColumnFamilyData(
     }
   }
 
+  merge_tasks_ = new MergeTaskSet();
+  merge_tasks_->Ref();
   RecalculateWriteStallConditions(mutable_cf_options_);
 }
 
@@ -454,6 +459,10 @@ ColumnFamilyData::~ColumnFamilyData() {
 
   if (current_ != nullptr) {
     current_->Unref();
+  }
+
+  if (merge_tasks_ != nullptr) {
+    merge_tasks_->Unref();
   }
 
   // It would be wrong if this ColumnFamilyData is in flush_queue_ or
@@ -829,13 +838,26 @@ void ColumnFamilyData::CreateNewMemtable(
 }
 
 bool ColumnFamilyData::NeedsCompaction() const {
-  return compaction_picker_->NeedsCompaction(current_->storage_info());
+  return super_version_->merge_tasks.size() > 0 || 
+      compaction_picker_->NeedsCompaction(current_->storage_info());
 }
 
 Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options, LogBuffer* log_buffer) {
-  auto* result = compaction_picker_->PickCompaction(
-      GetName(), mutable_options, current_->storage_info(), log_buffer);
+  Compaction* result = nullptr;
+
+  if (super_version_->merge_tasks.size() > 0) {
+    MergeTask* merge_task;
+    auto begin = super_version->merge_tasks->tasks.begin();
+    merge_task = *begin;
+    result = compaction_picker_->MergeFileSlices(
+        merge_task, super_version->current->storage_info(), mutable_cf_options, ioptions());
+    super_version->merge_tasks->tasks.erase(begin);
+    delete merge_task;
+  }else {
+    result = compaction_picker_->PickCompaction(
+        GetName(), mutable_options, current_->storage_info(), log_buffer);
+  }
   if (result != nullptr) {
     result->SetInputVersion(current_);
   }
@@ -956,7 +978,7 @@ void ColumnFamilyData::InstallSuperVersion(
   SuperVersion* new_superversion = sv_context->new_superversion.release();
   new_superversion->db_mutex = db_mutex;
   new_superversion->mutable_cf_options = mutable_cf_options;
-  new_superversion->Init(mem_, imm_.current(), current_);
+  new_superversion->Init(mem_, imm_.current(), current_, merge_tasks_);
   SuperVersion* old_superversion = super_version_;
   super_version_ = new_superversion;
   ++super_version_number_;

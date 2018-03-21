@@ -1678,7 +1678,63 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     ++bg_bottom_compaction_scheduled_;
     env_->Schedule(&DBImpl::BGWorkBottomCompaction, ca, Env::Priority::BOTTOM,
                    this, &DBImpl::UnscheduleCallback);
-  } else {
+  } else if (c->input_level() >= 
+        c->column_family_data()->GetCurrentMutableCFOptions().compaction_options_2pc.start_level){
+    TEST_SYNC_POINT("DBImpl::BackgroundCompaction:2PCLink");
+    ThreadStatusUtil::SetColumnFamily(
+        c->column_family_data(), c->column_family_data()->ioptions()->env,
+        immutable_db_options_.enable_thread_tracking);
+    ThreadStatusUtil::SetThreadOperation(ThreadStatus::OP_COMPACTION);
+
+    const LevelFilesBrief* start_level_files = c->input_levels(c->start_level());
+    const LevelFilesBrief* output_level_files = c->input_levels(c->output_level());
+    int start_index = 0;
+    int output_index = 0;
+    bool is_contain_smallest = true;
+    while (start_index < start_level_files->num_files){
+      auto& cstart_smallest_key = start_level_files->files[start_index]->file_metadata->smallest_key;
+      auto& cstart_largest_key = start_level_files->files[start_index]->file_metadata->largest_key;
+      auto& coutput_largest_key = output_level_files->files[output_index]->file_metadata->largest_key;
+      int cmp = c->column_family_data()->internal_comparator().Compare(cstart_largest_key, coutput_largest_key);
+      if (cmp > 0){
+        // cut current start level file, interator output file
+        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
+          output_level_files->files[output_index]->fd, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
+        is_contain_smallest = false;
+        if (ouput_index + 1 < output_level_files->num_files) {
+          ouput_index++;
+        }
+      }else if(cmp == 0){
+        // iterate start level file and output level file
+        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
+          output_level_files->files[output_index]->fd, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
+        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index]->file_metadata);
+        is_contain_smallest = true;
+        if (ouput_index + 1 < output_level_files->num_files) {
+          ouput_index++;
+        }
+        start_index++;
+      }else{  // cmp < 0
+        // iterate start level file
+        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
+          output_level_files->files[output_index]->fd, cstart_smallest_key, cstart_largest_key, is_contain_smallest);
+        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index]->file_metadata);
+        is_contain_smallest = true;
+        start_index++;
+      }
+    }
+
+    status = versions_->LogAndApply(c->column_family_data(),
+                                    *c->mutable_cf_options(), c->edit(),
+                                    &mutex_, directories_.GetDbDir());
+    // Use latest MutableCFOptions
+    InstallSuperVersionAndScheduleWork(
+        c->column_family_data(), &job_context->superversion_context,
+        *c->mutable_cf_options());
+
+    // Clear Instrument
+    ThreadStatusUtil::ResetThreadStatus();
+  }else {
     int output_level  __attribute__((unused));
     output_level = c->output_level();
     TEST_SYNC_POINT_CALLBACK("DBImpl::BackgroundCompaction:NonTrivial",

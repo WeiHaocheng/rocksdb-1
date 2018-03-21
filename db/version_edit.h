@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <unordered_map>
 #include "rocksdb/cache.h"
 #include "db/dbformat.h"
 #include "util/arena.h"
@@ -73,6 +74,20 @@ struct FileSampledStats {
   mutable std::atomic<uint64_t> num_reads_sampled;
 };
 
+// WEIHAOCHENG:add for 2PC
+struct FileSlice {
+  InternalKey smallest;
+  InternalKey largest;
+  FileDescriptor* parent_file_fd;
+  bool  is_contain_smallest;
+}
+/*
+struct FileSliceDescriptor{
+  int level;
+  uint
+
+}
+*/
 struct FileMetaData {
   FileDescriptor fd;
   InternalKey smallest;            // Smallest internal key served by table
@@ -106,6 +121,8 @@ struct FileMetaData {
 
   bool marked_for_compaction;  // True if client asked us nicely to compact this
                                // file.
+
+  std::vector<FileSlice> file_slices;  // WEIHAOCHENG:add for 2PC
 
   FileMetaData()
       : smallest_seqno(kMaxSequenceNumber),
@@ -219,6 +236,21 @@ class VersionEdit {
     new_files_.emplace_back(level, std::move(f));
   }
 
+  void AddFileSlice(int start_level, int output_level, FileDescriptor& start_level_fd, 
+               FileDescriptor& output_level_fd, const InternalKey& smallest,
+               const InternalKey& largest, bool is_contain_smallest){
+    FileSlice fs;
+    fs.smallest = smallest;
+    fs.largest = largest;
+    fs.parent_file_fd = output_file_fd;
+    fs.is_contain_smallest = is_contain_smallest;
+    new_file_slices_.insert(std::make_pair(std::make_pair(output_level, output_level_fd.GetNumber())), fs);
+  }
+
+  void MoveFileFrozen(int level, FileMetaData* file_meta){
+    moved_frozen_files_.insert(std::make_pair(level, file_meta));
+  }
+
   void AddFile(int level, const FileMetaData& f) {
     assert(f.smallest_seqno <= f.largest_seqno);
     new_files_.emplace_back(level, f);
@@ -266,6 +298,8 @@ class VersionEdit {
   typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;
 
   const DeletedFileSet& GetDeletedFiles() { return deleted_files_; }
+  std::set<std::pair<int, FileMetaData*>>& GetMovedFiles() { return moved_frozen_files_; }
+  const std::unordered_map<std::pair<int, uint64_t>, FileSlice>& GetNewFileSlice() { return new_file_slices; }
   const std::vector<std::pair<int, FileMetaData>>& GetNewFiles() {
     return new_files_;
   }
@@ -295,6 +329,10 @@ class VersionEdit {
 
   DeletedFileSet deleted_files_;
   std::vector<std::pair<int, FileMetaData>> new_files_;
+
+  //WEIHAOCHENG: add for 2pc
+  std::set<std::pair<int, FileMetaData*>> moved_frozen_files_;
+  std::unordered_map<std::pair<int, uint64_t>, FileSlice> new_file_slices_;
 
   // Each version edit record should have column_family_id set
   // If it's not set, it is default (0)

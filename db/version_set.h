@@ -27,6 +27,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_set>
 
 #include "db/column_family.h"
 #include "db/compaction.h"
@@ -88,7 +89,8 @@ extern bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
 // arena: Arena used to allocate the memory
 extern void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
                                       const std::vector<FileMetaData*>& files,
-                                      Arena* arena);
+                                      Arena* arena,
+                                      const InternalKeyComparator* internal_comparator = nullptr);
 
 class VersionStorageInfo {
  public:
@@ -102,6 +104,11 @@ class VersionStorageInfo {
   void Reserve(int level, size_t size) { files_[level].reserve(size); }
 
   void AddFile(int level, FileMetaData* f, Logger* info_log = nullptr);
+
+  void AddFrozenFile(int level, FileMetaData* f);
+
+  void AddFileSlice(int level, FileMetaData* f, FileSlice& fs, FileMetaData* pre_file, 
+                    bool& file_slice_larger, Logger* info_log);
 
   void SetFinalized();
 
@@ -184,9 +191,10 @@ class VersionStorageInfo {
       std::vector<FileMetaData*>* inputs,
       int hint_index = -1,        // index of overlap file
       int* file_index = nullptr,  // return index of overlap file
-      bool expand_range = true)   // if set, returns files which overlap the
-      const;                      // range and overlap each other. If false,
-                                  // then just files intersecting the range
+      bool expand_range = true,   // if set, returns files which overlap the range and overlap each other. If false,hen just files intersecting the range
+      bool within_interval = false)   // if set, returns files which overlap in 2pc link need
+      const;                      
+                                  
   void GetCleanInputsWithinInterval(
       int level, const InternalKey* begin,  // nullptr means before all keys
       const InternalKey* end,               // nullptr means after all keys
@@ -265,6 +273,10 @@ class VersionStorageInfo {
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
   const std::vector<FileMetaData*>& LevelFiles(int level) const {
     return files_[level];
+  }
+
+  const std::unordered_map<uint64_t, FileMetaData*>& LevelFrozenFiles(int level) const {
+    return frozen_files_[level];
   }
 
   const rocksdb::LevelFilesBrief& LevelFilesBrief(int level) const {
@@ -397,6 +409,8 @@ class VersionStorageInfo {
                                      const Slice& largest_key, int last_level,
                                      int last_l0_idx);
 
+  std::unordered_set<FileMetaData*>* GetFrozenFiles() { return frozen_files_; }
+
  private:
   const InternalKeyComparator* internal_comparator_;
   const Comparator* user_comparator_;
@@ -416,6 +430,11 @@ class VersionStorageInfo {
   // List of files per level, files in each level are arranged
   // in increasing order of keys
   std::vector<FileMetaData*>* files_;
+
+  // WEIHAOCHENG:add for 2PC
+  // key:file_number value:FileMetaData*
+  std::unordered_set<FileMetaData*>* frozen_files_;
+  MutableCFOptions mutable_cf_options_;
 
   // Level that L0 data should be compacted to. All levels < base_level_ should
   // be empty. -1 if it is not level-compaction so it's not applicable.

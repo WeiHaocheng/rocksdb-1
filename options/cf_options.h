@@ -224,6 +224,7 @@ struct MutableCFOptions {
   std::vector<int> max_bytes_for_level_multiplier_additional;
   CompactionOptionsFIFO compaction_options_fifo;
   CompactionOptionsUniversal compaction_options_universal;
+  CompactionOptionsTwoPC compaction_options_2pc;
 
   // Misc options
   uint64_t max_sequential_skip_in_iterations;

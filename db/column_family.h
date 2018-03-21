@@ -86,6 +86,38 @@ class ColumnFamilyHandleInternal : public ColumnFamilyHandleImpl {
   ColumnFamilyData* internal_cfd_;
 };
 
+struct MergeTask{
+  int level;
+  InternalKey smallest_key;
+  InternalKey largest_key;
+  bool start;
+
+  MergeTask(int level_, InternalKey& smallest_key, InternalKey largest_key):
+    level(level_),
+    smallest_key(smallest_key_),
+    largest_key(largest_key_),
+    start(false){
+    }
+}
+
+typedef std::set<MergeTask*> MergeTaskSet;
+
+struct MergeTaskSet {
+  std::set<MergeTask*> tasks;
+  int ref;
+
+  MergeTaskSet() ref(0) {}
+
+  void Ref() {ref++;}
+
+  void Unref() {
+    ref--;
+    if (ref == 0){
+      tasks.clear();
+    }
+  }
+}
+
 // holds references to memtable, all immutable memtables and version
 struct SuperVersion {
   // Accessing members of this class is not thread-safe and requires external
@@ -94,6 +126,7 @@ struct SuperVersion {
   MemTableListVersion* imm;
   Version* current;
   MutableCFOptions mutable_cf_options;
+  MergeTaskSet* merge_tasks;
   // Version number of the current SuperVersion
   uint64_t version_number;
   WriteStallCondition write_stall_condition;
@@ -114,7 +147,7 @@ struct SuperVersion {
   // objects needs to be done in the mutex
   void Cleanup();
   void Init(MemTable* new_mem, MemTableListVersion* new_imm,
-            Version* new_current);
+            Version* new_current, MergeTaskSet* merge_tasks);
 
   // The value of dummy is not actually used. kSVInUse takes its address as a
   // mark in the thread local storage to indicate the SuperVersion is in use
@@ -378,6 +411,7 @@ class ColumnFamilyData {
 
   MemTable* mem_;
   MemTableList imm_;
+  MergeTaskSet* merge_tasks_;
   SuperVersion* super_version_;
 
   // An ordinal representing the current SuperVersion. Updated by

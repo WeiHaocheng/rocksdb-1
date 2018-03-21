@@ -84,6 +84,8 @@ class VersionBuilder::Rep {
     std::unordered_set<uint64_t> deleted_files;
     // Map from file number to file meta data.
     std::unordered_map<uint64_t, FileMetaData*> added_files;
+    std::unordered_multimap<uint64_t, FileSlice> added_file_slices;
+    std::unordered_set<FileMetaData*> added_frozen_files;
   };
 
   const EnvOptions& env_options_;
@@ -102,16 +104,18 @@ class VersionBuilder::Rep {
   bool has_invalid_levels_;
   FileComparator level_zero_cmp_;
   FileComparator level_nonzero_cmp_;
+  SuperVersion*  super_version_;  
 
  public:
   Rep(const EnvOptions& env_options, Logger* info_log, TableCache* table_cache,
-      VersionStorageInfo* base_vstorage)
+      VersionStorageInfo* base_vstorage, SuperVersion*  super_version)
       : env_options_(env_options),
         info_log_(info_log),
         table_cache_(table_cache),
         base_vstorage_(base_vstorage),
         num_levels_(base_vstorage->num_levels()),
-        has_invalid_levels_(false) {
+        has_invalid_levels_(false),
+        super_version_(super_version) {
     levels_ = new LevelState[num_levels_];
     level_zero_cmp_.sort_method = FileComparator::kLevel0;
     level_nonzero_cmp_.sort_method = FileComparator::kLevelNon0;
@@ -264,6 +268,34 @@ class VersionBuilder::Rep {
   void Apply(VersionEdit* edit) {
     CheckConsistency(base_vstorage_);
 
+    // Move files to Frozen Region
+    const VersionEdit::DeletedFileSet& mov = edit->GetMovedFiles();
+    for (const auto& mov_file : mov) {
+      const auto level = mov_file.first;
+      const auto* file_meta_data =  mov_file.second;
+      if (level < num_levels_) {
+        levels_[level].moved_files.insert(file_meta_data);
+      }else {
+        #ifndef
+        assert(false);
+        #endif
+      }
+    }
+
+    //Add file slice
+    const auto& file_slices = edit->GetNewFileSlice();
+    for(const auto& file_slice : file_slices){
+      const auto level = file_slice.first.first;
+      const auto number = file_slice.first.second;
+      if (level < num_levels_) {
+        levels_[level].added_file_slices.insert(std::make_pair(number, file_slice.second));
+      }else {
+        #ifndef
+        assert(false);
+        #endif
+      }
+    }
+
     // Delete files
     const VersionEdit::DeletedFileSet& del = edit->GetDeletedFiles();
     for (const auto& del_file : del) {
@@ -349,18 +381,25 @@ class VersionBuilder::Rep {
         prev_file = added;
 #endif
 
+        bool file_slice_larger = false;
+        FileMetaData** last_file = nullptr;
         // Add all smaller files listed in base_
         for (auto bpos = std::upper_bound(base_iter, base_end, added, cmp);
              base_iter != bpos; ++base_iter) {
-          MaybeAddFile(vstorage, level, *base_iter);
+          MaybeAddFile(vstorage, level, *base_iter, last_file, file_slice_larger);
         }
 
-        MaybeAddFile(vstorage, level, added);
+        MaybeAddFile(vstorage, level, added, last_file, file_slice_larger);
       }
 
       // Add remaining base files
       for (; base_iter != base_end; ++base_iter) {
-        MaybeAddFile(vstorage, level, *base_iter);
+        MaybeAddFile(vstorage, level, *base_iter, last_file, file_slice_larger);
+      }
+
+      const auto& added_frozen_files = levels_[level].added_frozen_files;
+      for(auto& frozen_file : added_frozen_files) {
+        vstorage->GetFrozenFiles()->insert(frozen_file);
       }
     }
 
@@ -418,12 +457,30 @@ class VersionBuilder::Rep {
     }
   }
 
-  void MaybeAddFile(VersionStorageInfo* vstorage, int level, FileMetaData* f) {
+  void MaybeAddFile(VersionStorageInfo* vstorage, int level, FileMetaData* f,
+                    FileMetaData** last_file, bool& file_slice_larger) {
     if (levels_[level].deleted_files.count(f->fd.GetNumber()) > 0) {
       // f is to-be-delected table file
       vstorage->RemoveCurrentStats(f);
-    } else {
+    } else if (levels_[level].moved_files.count(f->fd.GetNumber()) > 0){
+      vstorage->AddFrozenFile(level, f);
+      // f is to-be-delected table file ?
+      vstorage->RemoveCurrentStats(f);
+    }else {
       vstorage->AddFile(level, f, info_log_);
+      auto iter_begin = levels_[level].added_frozen_files.lower_bound(f->fd.GetNumber());
+      auto iter_end = levels_[level].added_frozen_files.upper_bound(f->fd.GetNumber());
+      bool add_file_slices = false;
+      for(auto iter = iter_begin; iter != iter_end; iter++){
+        vstorage->AddFileSlice(level, f, iter.second, *last_file, file_slice_larger, info_log_);
+        add_file_slices = true;
+      }
+      //TODO change in options
+      if (add_file_slices && f->file_slices.size() == 5){
+        MergeTask* merge_task = new MergeTask(level, f->smallest_key, f->largest_key);
+        super_version_->merge_tasks->tasks.insert(merge_task);
+      }
+      *last_file = f;
     }
   }
 };
@@ -431,8 +488,9 @@ class VersionBuilder::Rep {
 VersionBuilder::VersionBuilder(const EnvOptions& env_options,
                                TableCache* table_cache,
                                VersionStorageInfo* base_vstorage,
-                               Logger* info_log)
-    : rep_(new Rep(env_options, info_log, table_cache, base_vstorage)) {}
+                               Logger* info_log,
+                               SuperVersion* super_version)
+    : rep_(new Rep(env_options, info_log, table_cache, base_vstorage, super_version)) {}
 
 VersionBuilder::~VersionBuilder() { delete rep_; }
 

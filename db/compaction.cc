@@ -175,7 +175,7 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
     input_levels_.resize(num_input_levels());
     for (size_t which = 0; which < num_input_levels(); which++) {
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
-                                &arena_);
+                                &arena_, vstorage->InternalComparator());
     }
   }
 
