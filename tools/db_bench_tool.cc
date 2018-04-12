@@ -82,7 +82,10 @@ using GFLAGS_NAMESPACE::SetUsageMessage;
 
 DEFINE_string(
     benchmarks,
-    "fillseq,"
+    //"fillseq,",
+    "fillrandom,"
+    "readrandom,",
+    /*
     "fillseqdeterministic,"
     "fillsync,"
     "fillrandom,"
@@ -118,7 +121,7 @@ DEFINE_string(
     "randomtransaction,"
     "randomreplacekeys,"
     "timeseries",
-
+    */
     "Comma-separated list of operations to run in the specified"
     " order. Available benchmarks:\n"
     "\tfillseq       -- write N values in sequential key"
@@ -185,7 +188,7 @@ DEFINE_string(
     "\tsstables    -- Print sstable info\n"
     "\theapprofile -- Dump a heap profile (if supported by this"
     " port)\n");
-
+    
 DEFINE_int64(num, 1000000, "Number of key/values to place in database");
 
 DEFINE_int64(numdistinct, 1000,
@@ -1370,6 +1373,7 @@ class ReporterAgent {
  private:
   std::string Header() const { return "secs_elapsed,interval_qps"; }
   void SleepAndReport() {
+    std::cout << "SleepAndReport report_interval_secs_:" << report_interval_secs_ << std::endl;
     uint64_t kMicrosInSecond = 1000 * 1000;
     auto time_started = env_->NowMicros();
     while (true) {
@@ -2152,7 +2156,8 @@ class Benchmark {
                            ? NewBloomFilterPolicy(FLAGS_bloom_bits,
                                                   FLAGS_use_block_based_filter)
                            : nullptr),
-        prefix_extractor_(NewFixedPrefixTransform(FLAGS_prefix_size)),
+        //prefix_extractor_(NewFixedPrefixTransform(FLAGS_prefix_size)),
+        prefix_extractor_(NewNoopTransform()), /*WEIHAOCHENG MODIFY*/
         num_(FLAGS_num),
         value_size_(FLAGS_value_size),
         key_size_(FLAGS_key_size),
@@ -4119,6 +4124,11 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     int64_t read = 0;
     int64_t found = 0;
     int64_t bytes = 0;
+
+    uint64_t found_time = 0;
+    uint64_t not_found_time = 0;
+    uint64_t reset_pinnable = 0;
+
     ReadOptions options(FLAGS_verify_checksum, true);
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -4134,15 +4144,28 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       GenerateKeyFromInt(key_rand, FLAGS_num, &key);
       read++;
       Status s;
+
+      uint64_t start = db_with_cfh->db->GetEnv()->NowMicros();
       if (FLAGS_num_column_families > 1) {
         s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(key_rand), key,
                                  &pinnable_val);
       } else {
+        uint64_t pin_start = db_with_cfh->db->GetEnv()->NowMicros();
         pinnable_val.Reset();
+        uint64_t pin_end = db_with_cfh->db->GetEnv()->NowMicros();
+        reset_pinnable += pin_end - pin_start;
         s = db_with_cfh->db->Get(options,
                                  db_with_cfh->db->DefaultColumnFamily(), key,
                                  &pinnable_val);
       }
+      uint64_t end = db_with_cfh->db->GetEnv()->NowMicros();
+
+      if (s.ok()) {
+        found_time += end - start;
+      } else {
+        not_found_time += end -start;
+      }
+
       if (s.ok()) {
         found++;
         bytes += key.size() + pinnable_val.size();
@@ -4160,6 +4183,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
     }
 
+    std::cout << "found_time:" << found_time << " not_found_time:" << not_found_time 
+        << " reset_pinnable:" << reset_pinnable << std::endl;
     char msg[100];
     snprintf(msg, sizeof(msg), "(%" PRIu64 " of %" PRIu64 " found)\n",
              found, read);

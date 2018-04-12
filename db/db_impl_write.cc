@@ -65,6 +65,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          uint64_t* log_used, uint64_t log_ref,
                          bool disable_memtable, uint64_t* seq_used,
                          PreReleaseCallback* pre_release_callback) {
+  uint64_t start_time = env_->NowMicros();
   if (my_batch == nullptr) {
     return Status::Corruption("Batch is nullptr!");
   }
@@ -378,6 +379,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
 
   if (status.ok()) {
     status = w.FinalStatus();
+  }
+
+  uint64_t duration = env_->NowMicros() - start_time;
+  if (duration >= 1000) {
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[100] ++;
+  } else {
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[duration/10] ++;
   }
   return status;
 }

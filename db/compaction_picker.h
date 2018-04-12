@@ -98,11 +98,10 @@ class CompactionPicker {
                            const std::vector<CompactionInputFiles>& input_files,
                            int output_level, VersionStorageInfo* vstorage,
                            const MutableCFOptions& mutable_cf_options,
-                           uint32_t output_path_id);
+                           uint32_t output_path_id, bool manual_call = true);
 
   Compaction* MergeFileSlices(
-    MergeTask& merge_task,
-    int output_level,
+    MergeTask* merge_task,
     VersionStorageInfo* vstorage, const MutableCFOptions& mutable_cf_options,
     const ImmutableCFOptions& ioptions);
 
@@ -175,7 +174,7 @@ class CompactionPicker {
                         VersionStorageInfo* vstorage,
                         CompactionInputFiles* inputs,
                         CompactionInputFiles* output_level_inputs,
-                        int* parent_index, int base_index);
+                        int* parent_index, int base_index, bool two_pc = false);
 
   void GetGrandparents(VersionStorageInfo* vstorage,
                        const CompactionInputFiles& inputs,

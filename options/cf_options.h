@@ -11,6 +11,7 @@
 #include "db/dbformat.h"
 #include "options/db_options.h"
 #include "rocksdb/options.h"
+#include "rocksdb/two_pc_compaction.h"
 #include "util/compression.h"
 
 namespace rocksdb {

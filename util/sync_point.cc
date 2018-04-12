@@ -166,5 +166,22 @@ void SyncPoint::Process(const std::string& point, void* cb_arg) {
   cleared_points_.insert(point);
   cv_.notify_all();
 }
+
+TwoPCStatic::TwoPCStatic():
+  compaction_input_size(0),
+  compaction_output_size(0),
+  get_num(0),
+  filter_num(0),
+  get_file_slice_num(0)
+ {
+  read_delay.resize(101, 0);
+  write_delay.resize(101, 0);
+}
+
+TwoPCStatic* TwoPCStatic::GetInstance() {
+  static TwoPCStatic two_pc_static;
+  return &two_pc_static;
+}
+
 }  // namespace rocksdb
 #endif  // NDEBUG

@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <inttypes.h>
 
 #include "db/builder.h"
 #include "db/compaction_job.h"
@@ -72,6 +73,7 @@
 #include "rocksdb/status.h"
 #include "rocksdb/table.h"
 #include "rocksdb/write_buffer_manager.h"
+#include "rocksdb/two_pc_compaction.h"
 #include "table/block.h"
 #include "table/block_based_table_factory.h"
 #include "table/merging_iterator.h"
@@ -157,7 +159,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       log_sync_cv_(&mutex_),
       total_log_size_(0),
       max_total_in_memory_state_(0),
-      is_snapshot_supported_(true),
+      is_snapshot_supported_(true), 
       write_buffer_manager_(immutable_db_options_.write_buffer_manager.get()),
       write_thread_(immutable_db_options_),
       nonmem_write_thread_(immutable_db_options_),
@@ -377,6 +379,21 @@ DBImpl::~DBImpl() {
   }
 
   ROCKS_LOG_INFO(immutable_db_options_.info_log, "Shutdown complete");
+
+  for (size_t i = 0; i <= 100; i++) {
+    ROCKS_LOG_INFO(immutable_db_options_.info_log, "TwoPCStatic: read deley[%d]:%" PRIu64 " \n  ", 
+      i*10, rocksdb::TwoPCStatic::GetInstance()->read_delay[i]);
+  }
+
+  for (size_t i = 0; i <= 100; i++) {
+    ROCKS_LOG_INFO(immutable_db_options_.info_log, "TwoPCStatic: write deley[%d]:%" PRIu64 " \n  ", 
+      i*10, rocksdb::TwoPCStatic::GetInstance()->write_delay[i]);
+  }
+
+   ROCKS_LOG_INFO(immutable_db_options_.info_log, "TwoPCStatic: compacion_input_size:%" PRIu64 " \n  TwoPCStatic: compacion_output_size:%" PRIu64 " \n Get: %d filter :%d slice_get:%d", 
+    rocksdb::TwoPCStatic::GetInstance()->compaction_input_size, rocksdb::TwoPCStatic::GetInstance()->compaction_output_size,
+    rocksdb::TwoPCStatic::GetInstance()->get_num, rocksdb::TwoPCStatic::GetInstance()->filter_num, 
+    rocksdb::TwoPCStatic::GetInstance()->get_file_slice_num);
   LogFlush(immutable_db_options_.info_log);
 }
 
@@ -963,6 +980,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
                        PinnableSlice* pinnable_val, bool* value_found,
                        ReadCallback* callback, bool* is_blob_index) {
   assert(pinnable_val != nullptr);
+  uint64_t start_time = env_->NowMicros();
   StopWatch sw(env_, stats_, DB_GET);
   PERF_TIMER_GUARD(get_snapshot_time);
 
@@ -1052,6 +1070,12 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
     RecordTick(stats_, BYTES_READ, size);
     MeasureTime(stats_, BYTES_PER_READ, size);
     PERF_COUNTER_ADD(get_read_bytes, size);
+  }
+  uint64_t duration = env_->NowMicros() - start_time;
+  if (duration >= 1000) {
+    rocksdb::TwoPCStatic::GetInstance()->read_delay[100] ++;
+  } else {
+    rocksdb::TwoPCStatic::GetInstance()->read_delay[duration/10] ++;
   }
   return s;
 }

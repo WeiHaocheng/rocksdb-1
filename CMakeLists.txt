@@ -482,6 +482,7 @@ set(SOURCES
         options/options_helper.cc
         options/options_parser.cc
         options/options_sanity_check.cc
+        options/two_pc_compaction.cc
         port/stack_trace.cc
         table/adaptive_table_factory.cc
         table/block.cc
@@ -514,6 +515,7 @@ set(SOURCES
         table/sst_file_writer.cc
         table/table_properties.cc
         table/two_level_iterator.cc
+        table/file_slice_iterator.cc
         tools/db_bench_tool.cc
         tools/dump/db_dump_tool.cc
         tools/ldb_cmd.cc
@@ -757,7 +759,7 @@ if(NOT WIN32 OR ROCKSDB_INSTALL_ON_WINDOWS)
   )
 endif()
 
-option(WITH_TESTS "build with tests" ON)
+option(WITH_TESTS "build with tests" OFF)
 if(WITH_TESTS)
   set(TESTS
         cache/cache_test.cc

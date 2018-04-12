@@ -45,6 +45,7 @@
 #include "options/db_options.h"
 #include "port/port.h"
 #include "rocksdb/env.h"
+#include "db/version_builder.h"
 
 namespace rocksdb {
 
@@ -105,10 +106,10 @@ class VersionStorageInfo {
 
   void AddFile(int level, FileMetaData* f, Logger* info_log = nullptr);
 
-  void AddFrozenFile(int level, FileMetaData* f);
+  void AddFrozenFile(int level, uint64_t file_number, FileMetaData* f);
 
-  void AddFileSlice(int level, FileMetaData* f, FileSlice& fs, FileMetaData* pre_file, 
-                    bool& file_slice_larger, Logger* info_log);
+  void AddFileSlice(int level, FileMetaData* f, FileSlice& fs, FileMetaData* pre_file = nullptr, 
+                    Logger* info_log = nullptr);
 
   void SetFinalized();
 
@@ -263,7 +264,8 @@ class VersionStorageInfo {
 
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
   int NumLevelFiles(int level) const {
-    assert(finalized_);
+    //WEIHAOCHENG moidfy
+    //assert(finalized_);
     return static_cast<int>(files_[level].size());
   }
 
@@ -275,9 +277,11 @@ class VersionStorageInfo {
     return files_[level];
   }
 
+  /*
   const std::unordered_map<uint64_t, FileMetaData*>& LevelFrozenFiles(int level) const {
     return frozen_files_[level];
   }
+  */
 
   const rocksdb::LevelFilesBrief& LevelFilesBrief(int level) const {
     assert(level < static_cast<int>(level_files_brief_.size()));
@@ -411,6 +415,8 @@ class VersionStorageInfo {
 
   std::unordered_set<FileMetaData*>* GetFrozenFiles() { return frozen_files_; }
 
+  //WEIHAOCHENG ADD
+  uint64_t version_number_;
  private:
   const InternalKeyComparator* internal_comparator_;
   const Comparator* user_comparator_;
@@ -886,6 +892,7 @@ class VersionSet {
 
   friend class Version;
   friend class DBImpl;
+  friend class VersionBuilder::Rep;
 
   struct LogReporter : public log::Reader::Reporter {
     Status* status;

@@ -12,6 +12,7 @@
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
+#include <iostream>
 #include "db/event_helpers.h"
 #include "util/file_util.h"
 #include "util/sst_file_manager_impl.h"
@@ -368,6 +369,7 @@ void DBImpl::PurgeObsoleteFiles(const JobContext& state, bool schedule_only) {
   // We may ignore the dbname when generating the file names.
   const char* kDumbDbName = "";
   for (auto file : state.sst_delete_files) {
+    std::cout << "DBImpl::PurgeObsoleteFiles file number:" << file->fd.GetNumber() << std::endl; 
     candidate_files.emplace_back(
         MakeTableFileName(kDumbDbName, file->fd.GetNumber()),
         file->fd.GetPathId());

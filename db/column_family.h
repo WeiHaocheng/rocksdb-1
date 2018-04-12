@@ -92,31 +92,29 @@ struct MergeTask{
   InternalKey largest_key;
   bool start;
 
-  MergeTask(int level_, InternalKey& smallest_key, InternalKey largest_key):
+  MergeTask(int level_, InternalKey& smallest_key_, InternalKey largest_key_):
     level(level_),
     smallest_key(smallest_key_),
     largest_key(largest_key_),
     start(false){
     }
-}
-
-typedef std::set<MergeTask*> MergeTaskSet;
+};
 
 struct MergeTaskSet {
   std::set<MergeTask*> tasks;
-  int ref;
+  int refs;
 
-  MergeTaskSet() ref(0) {}
+  MergeTaskSet() { refs = 0; }
 
-  void Ref() {ref++;}
+  void Ref() { refs += 1; }
 
   void Unref() {
-    ref--;
-    if (ref == 0){
+    refs--;
+    if (refs == 0){
       tasks.clear();
     }
   }
-}
+};
 
 // holds references to memtable, all immutable memtables and version
 struct SuperVersion {

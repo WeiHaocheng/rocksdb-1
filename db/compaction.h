@@ -107,6 +107,16 @@ class Compaction {
 
   const std::vector<CompactionInputFiles>* inputs() { return &inputs_; }
 
+  uint64_t input_size() {
+    uint64_t total_size = 0;
+    for (auto& level_files : inputs_) {
+      for (auto* file : level_files.files) {
+        total_size += file->compensated_file_size;
+      }
+    }
+    return total_size;
+  }
+
   // Returns the LevelFilesBrief of the specified compaction input level.
   const LevelFilesBrief* input_levels(size_t compaction_input_level) const {
     return &input_levels_[compaction_input_level];
@@ -124,6 +134,9 @@ class Compaction {
   // Is this a trivial compaction that can be implemented by just
   // moving a single input file to the next level (no merging or splitting)
   bool IsTrivialMove() const;
+
+  // WEIHAOCHENG: add for 2pc
+  bool IsMergeCompaction() const;
 
   // If true, then the compaction can be done by simply deleting input files.
   bool deletion_compaction() const { return deletion_compaction_; }

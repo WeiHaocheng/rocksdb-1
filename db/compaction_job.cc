@@ -23,6 +23,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -44,6 +45,7 @@
 #include "rocksdb/statistics.h"
 #include "rocksdb/status.h"
 #include "rocksdb/table.h"
+#include "rocksdb/two_pc_compaction.h"
 #include "table/block.h"
 #include "table/block_based_table_factory.h"
 #include "table/merging_iterator.h"
@@ -588,6 +590,7 @@ Status CompactionJob::Install(const MutableCFOptions& mutable_cf_options) {
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_INSTALL);
   db_mutex_->AssertHeld();
+  std::cout << "CompactionJob::Install: coming" << std::endl;
   Status status = compact_->status;
   ColumnFamilyData* cfd = compact_->compaction->column_family_data();
   cfd->internal_stats()->AddCompactionStats(
@@ -752,8 +755,11 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
   TEST_SYNC_POINT("CompactionJob::Run():Inprogress");
 
-  Slice* start = sub_compact->start;
-  Slice* end = sub_compact->end;
+  //Slice* start = sub_compact->start;
+  //Slice* end = sub_compact->end;
+  //WEIHAOCHENG:2pc close sub compact
+  Slice* start = nullptr;
+  Slice* end = nullptr;
   if (start != nullptr) {
     IterKey start_iter;
     start_iter.SetInternalKey(*start, kMaxSequenceNumber, kValueTypeForSeek);
@@ -798,16 +804,21 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   std::string dict_sample_data;
   dict_sample_data.reserve(kSampleBytes);
 
+  uint64_t total_input_size = 0;
+  uint64_t total_output_size = 0;
+
   while (status.ok() && !cfd->IsDropped() && c_iter->Valid()) {
     // Invariant: c_iter.status() is guaranteed to be OK if c_iter->Valid()
     // returns true.
     const Slice& key = c_iter->key();
     const Slice& value = c_iter->value();
+    total_input_size += key.size() + value.size();
 
     // If an end key (exclusive) is specified, check if the current key is
     // >= than it and exit if it is because the iterator is out of its range
     if (end != nullptr &&
         cfd->user_comparator()->Compare(c_iter->user_key(), *end) >= 0) {
+      std::cout << "CompactionJob::ProcessKeyValueCompaction Compare(c_iter->user_key(), *end) >= 0" << std::endl;
       break;
     }
     if (c_iter_stats.num_input_records % kRecordStatsEvery ==
@@ -821,11 +832,13 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     if (sub_compact->builder == nullptr) {
       status = OpenCompactionOutputFile(sub_compact);
       if (!status.ok()) {
+        std::cout << "CompactionJob::ProcessKeyValueCompaction Open OutputFileError" << std::endl;
         break;
       }
     }
     assert(sub_compact->builder != nullptr);
     assert(sub_compact->current_output() != nullptr);
+    total_output_size += key.size() + value.size();
     sub_compact->builder->Add(key, value);
     sub_compact->current_output_file_size = sub_compact->builder->FileSize();
     sub_compact->current_output()->meta.UpdateBoundaries(
@@ -899,7 +912,9 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       input_status = input->status();
       output_file_ended = true;
     }
+    bool flag1 = c_iter->Valid();
     c_iter->Next();
+    bool flag2 = c_iter->Valid();
     if (!output_file_ended && c_iter->Valid() &&
         sub_compact->compaction->output_level() != 0 &&
         sub_compact->ShouldStopBefore(
@@ -917,9 +932,18 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
         next_key = &c_iter->key();
       }
       CompactionIterationStats range_del_out_stats;
+      if (sub_compact->compaction->output_level() == 2) {
+        std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile total_size:" << total_input_size 
+          << " c_iter->Valid():" << c_iter->Valid() 
+              << " flag1:" << flag1 << " flag2:" << flag2 << std::endl;
+      }
       status = FinishCompactionOutputFile(input_status, sub_compact,
                                           range_del_agg.get(),
                                           &range_del_out_stats, next_key);
+      if (sub_compact->compaction->output_level() == 2) {
+        std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile end total_size:" << total_input_size 
+          << " c_iter->Valid():" << c_iter->Valid() << std::endl;
+      }
       RecordDroppedKeys(range_del_out_stats,
                         &sub_compact->compaction_job_stats);
       if (sub_compact->outputs.size() == 1) {
@@ -934,6 +958,13 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
         }
       }
     }
+  }
+
+  //rocksdb::TwoPCStatic::GetInstance()->compaction_input_size += total_input_size;
+  rocksdb::TwoPCStatic::GetInstance()->compaction_output_size += total_output_size;
+
+  if (!c_iter->Valid()) {
+    std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile !c_iter->Valid()" << std::endl;
   }
 
   sub_compact->num_input_records = c_iter_stats.num_input_records;
@@ -962,7 +993,10 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   }
   if (status.ok()) {
     status = input->status();
+  } else {
+    std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile !status.ok()" << std::endl;
   }
+
   if (status.ok()) {
     status = c_iter->status();
   }
@@ -978,12 +1012,20 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   // close the output file.
   if (sub_compact->builder != nullptr) {
     CompactionIterationStats range_del_out_stats;
+    if (sub_compact->compaction->output_level() == 2) {
+        std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile 2" 
+          << "sub_compact->current_output_file_size:" << sub_compact->current_output_file_size 
+            << " max_output_file_size:"<< sub_compact->compaction->max_output_file_size() 
+              << " total_size:" << total_input_size << std::endl;
+    }
     Status s = FinishCompactionOutputFile(
         status, sub_compact, range_del_agg.get(), &range_del_out_stats);
     if (status.ok()) {
       status = s;
     }
     RecordDroppedKeys(range_del_out_stats, &sub_compact->compaction_job_stats);
+  } else {
+    std::cout << "CompactionJob::ProcessKeyValueCompaction FinishCompactionOutputFile2 sub_compact->builder == nullptr" << std::endl;
   }
 
   if (measure_io_stats_) {
@@ -1012,12 +1054,12 @@ void CompactionJob::RecordDroppedKeys(
     RecordTick(stats_, COMPACTION_KEY_DROP_USER,
                c_iter_stats.num_record_drop_user);
   }
-  if (c_iter_stats.num_record_drop_hidden > 0) {
+  if (c_iter_stats.num_record_drop_hidden1 > 0) {
     RecordTick(stats_, COMPACTION_KEY_DROP_NEWER_ENTRY,
-               c_iter_stats.num_record_drop_hidden);
+               c_iter_stats.num_record_drop_hidden1);
     if (compaction_job_stats) {
       compaction_job_stats->num_records_replaced +=
-          c_iter_stats.num_record_drop_hidden;
+          c_iter_stats.num_record_drop_hidden1;
     }
   }
   if (c_iter_stats.num_record_drop_obsolete > 0) {
@@ -1224,6 +1266,9 @@ Status CompactionJob::InstallCompactionResults(
   db_mutex_->AssertHeld();
 
   auto* compaction = compact_->compaction;
+
+  rocksdb::TwoPCStatic::GetInstance()->compaction_input_size += compaction->input_size();
+
   // paranoia: verify that the files that we started with
   // still exist in the current version and in the same original level.
   // This ensures that a concurrent compaction did not erroneously
@@ -1250,9 +1295,13 @@ Status CompactionJob::InstallCompactionResults(
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     for (const auto& out : sub_compact.outputs) {
+      if (compact_->compaction->output_level() == 2) {
+        std::cout << "CompactionJob::InstallCompactionResults AddFile" << std::endl;
+      }
       compaction->edit()->AddFile(compaction->output_level(), out.meta);
     }
   }
+
   return versions_->LogAndApply(compaction->column_family_data(),
                                 mutable_cf_options, compaction->edit(),
                                 db_mutex_, db_directory_);
@@ -1354,6 +1403,7 @@ Status CompactionJob::OpenCompactionOutputFile(
 }
 
 void CompactionJob::CleanupCompaction() {
+  std::cout << "CompactionJob::CleanupCompaction: coming" << std::endl;
   for (SubcompactionState& sub_compact : compact_->sub_compact_states) {
     const auto& sub_status = sub_compact.status;
 

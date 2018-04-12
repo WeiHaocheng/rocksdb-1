@@ -18,6 +18,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <iostream>
 
 #include "db/dbformat.h"
 
@@ -390,7 +391,16 @@ void BlockBasedTableBuilder::Add(const Slice& key, const Slice& value) {
   ValueType value_type = ExtractValueType(key);
   if (IsValueType(value_type)) {
     if (r->props.num_entries > 0) {
-      assert(r->internal_comparator.Compare(key, Slice(r->last_key)) > 0);
+      if (r->internal_comparator.Compare(key, Slice(r->last_key)) < 0) {
+        /*
+        // WEIHAOCHENG: there are some bugs here!!!
+        if (r->internal_comparator.Compare(key, Slice(r->last_key)) == 0) {
+          std::cout << "BlockBasedTableBuilder::Add the same key" << std::endl;
+        }
+        return ;
+        */
+        assert(r->internal_comparator.Compare(key, Slice(r->last_key)) > 0);
+      }
     }
 
     auto should_flush = r->flush_block_policy->Update(key, value);
@@ -640,6 +650,8 @@ Status BlockBasedTableBuilder::Finish() {
   assert(!r->closed);
   r->closed = true;
 
+  std::cout << "BlockBasedTableBuilder::Finish raw_size:" << r->props.raw_key_size + r->props.raw_value_size
+    << "file size:" << FileSize() << std::endl;
   // To make sure properties block is able to keep the accurate size of index
   // block, we will finish writing all index entries here and flush them
   // to storage after metaindex block is written.

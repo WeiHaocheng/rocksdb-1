@@ -18,6 +18,7 @@
 #include "db/dbformat.h"
 #include "util/arena.h"
 #include "util/autovector.h"
+#include <iostream>
 
 namespace rocksdb {
 
@@ -74,20 +75,16 @@ struct FileSampledStats {
   mutable std::atomic<uint64_t> num_reads_sampled;
 };
 
+class FileMetaData;
 // WEIHAOCHENG:add for 2PC
 struct FileSlice {
   InternalKey smallest;
   InternalKey largest;
-  FileDescriptor* parent_file_fd;
+  FileMetaData* parent_file_meta;
+  uint64_t output_file_number;
   bool  is_contain_smallest;
-}
-/*
-struct FileSliceDescriptor{
-  int level;
-  uint
+};
 
-}
-*/
 struct FileMetaData {
   FileDescriptor fd;
   InternalKey smallest;            // Smallest internal key served by table
@@ -123,6 +120,7 @@ struct FileMetaData {
                                // file.
 
   std::vector<FileSlice> file_slices;  // WEIHAOCHENG:add for 2PC
+  int slice_refs;  //debug
 
   FileMetaData()
       : smallest_seqno(kMaxSequenceNumber),
@@ -136,7 +134,8 @@ struct FileMetaData {
         refs(0),
         being_compacted(false),
         init_stats_from_file(false),
-        marked_for_compaction(false) {}
+        marked_for_compaction(false),
+        slice_refs(0) {}
 
   // REQUIRED: Keys must be given to the function in sorted order (it expects
   // the last key to be the largest).
@@ -236,19 +235,22 @@ class VersionEdit {
     new_files_.emplace_back(level, std::move(f));
   }
 
-  void AddFileSlice(int start_level, int output_level, FileDescriptor& start_level_fd, 
-               FileDescriptor& output_level_fd, const InternalKey& smallest,
+  void AddFileSlice(int start_level, int output_level, FileMetaData* start_level_file, 
+               FileMetaData* output_level_file, const InternalKey& smallest,
                const InternalKey& largest, bool is_contain_smallest){
+    std::cout << "version_edit.h AddFileSlice" << std::endl;
     FileSlice fs;
     fs.smallest = smallest;
     fs.largest = largest;
-    fs.parent_file_fd = output_file_fd;
+    fs.parent_file_meta = start_level_file;
     fs.is_contain_smallest = is_contain_smallest;
-    new_file_slices_.insert(std::make_pair(std::make_pair(output_level, output_level_fd.GetNumber())), fs);
+    fs.output_file_number = output_level_file->fd.GetNumber();
+    new_file_slices_.insert(std::make_pair(output_level, fs));
   }
 
   void MoveFileFrozen(int level, FileMetaData* file_meta){
     moved_frozen_files_.insert(std::make_pair(level, file_meta));
+    //deleted_files_.insert({level, file_meta->fd.GetNumber()});
   }
 
   void AddFile(int level, const FileMetaData& f) {
@@ -299,7 +301,7 @@ class VersionEdit {
 
   const DeletedFileSet& GetDeletedFiles() { return deleted_files_; }
   std::set<std::pair<int, FileMetaData*>>& GetMovedFiles() { return moved_frozen_files_; }
-  const std::unordered_map<std::pair<int, uint64_t>, FileSlice>& GetNewFileSlice() { return new_file_slices; }
+  const std::unordered_multimap<int, FileSlice>& GetNewFileSlice() { return new_file_slices_; }
   const std::vector<std::pair<int, FileMetaData>>& GetNewFiles() {
     return new_files_;
   }
@@ -332,7 +334,8 @@ class VersionEdit {
 
   //WEIHAOCHENG: add for 2pc
   std::set<std::pair<int, FileMetaData*>> moved_frozen_files_;
-  std::unordered_map<std::pair<int, uint64_t>, FileSlice> new_file_slices_;
+  //std::unordered_map<std::pair<int, uint64_t>, FileSlice> new_file_slices_;
+  std::unordered_multimap<int, FileSlice> new_file_slices_;
 
   // Each version edit record should have column_family_id set
   // If it's not set, it is default (0)

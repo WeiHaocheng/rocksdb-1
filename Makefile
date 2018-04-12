@@ -90,6 +90,7 @@ endif
 # compile with -O2 if debug level is not 2
 ifneq ($(DEBUG_LEVEL), 2)
 OPT += -O2 -fno-omit-frame-pointer
+#OPT += -O0 -fno-omit-frame-pointer
 # Skip for archs that don't support -momit-leaf-frame-pointer
 ifeq (,$(shell $(CXX) -fsyntax-only -momit-leaf-frame-pointer -xc /dev/null 2>&1))
 OPT += -momit-leaf-frame-pointer
@@ -177,11 +178,13 @@ missing_make_config_paths := $(shell				\
 $(foreach path, $(missing_make_config_paths), \
 	$(warning Warning: $(path) dont exist))
 
+#CFLAGS += -g
+#CXXFLAGS += -g
 ifeq ($(PLATFORM), OS_AIX)
 # no debug info
 else ifneq ($(PLATFORM), IOS)
-CFLAGS += -g
-CXXFLAGS += -g
+# CFLAGS += -g
+# CXXFLAGS += -g
 else
 # no debug info for IOS, that will make our library big
 OPT += -DNDEBUG
@@ -363,34 +366,34 @@ EXPOBJECTS = $(EXP_LIB_SOURCES:.cc=.o) $(LIBOBJECTS) $(TESTUTIL)
 
 TESTS = \
 	db_basic_test \
-	db_encryption_test \
-	db_test2 \
-	external_sst_file_basic_test \
-	auto_roll_logger_test \
-	bloom_test \
-	dynamic_bloom_test \
-	c_test \
-	checkpoint_test \
-	crc32c_test \
-	coding_test \
-	inlineskiplist_test \
-	env_basic_test \
-	env_test \
-	hash_test \
-	thread_local_test \
-	rate_limiter_test \
-	perf_context_test \
-	iostats_context_test \
-	db_wal_test \
-	db_block_cache_test \
-	db_test \
-	db_blob_index_test \
-	db_bloom_filter_test \
-	db_iter_test \
-	db_log_iter_test \
-	db_compaction_filter_test \
-	db_compaction_test \
-	db_dynamic_level_test \
+#	db_encryption_test \
+#	db_test2 \
+#	external_sst_file_basic_test \
+#	auto_roll_logger_test \
+#	bloom_test \
+#	dynamic_bloom_test \
+#	c_test \
+#	checkpoint_test \
+#	crc32c_test \
+#	coding_test \
+#	inlineskiplist_test \
+#	env_basic_test \
+#	env_test \
+#	hash_test \
+#	thread_local_test \
+#	rate_limiter_test \
+#	perf_context_test \
+#	iostats_context_test \
+#	db_wal_test \
+#	db_block_cache_test \
+#	db_test \
+#	db_blob_index_test \
+#	db_bloom_filter_test \
+#	db_iter_test \
+#	db_log_iter_test \
+#	db_compaction_filter_test \
+#	db_compaction_test \
+#	db_dynamic_level_test \
 	db_flush_test \
 	db_inplace_update_test \
 	db_iterator_test \

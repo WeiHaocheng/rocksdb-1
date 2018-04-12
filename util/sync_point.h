@@ -127,6 +127,21 @@ class SyncPoint {
   int num_callbacks_running_ = 0;
 };
 
+class TwoPCStatic {
+public:
+  static TwoPCStatic* GetInstance();
+  uint64_t compaction_input_size;
+  uint64_t compaction_output_size;
+  std::vector<uint64_t> read_delay;
+  std::vector<uint64_t> write_delay;
+  uint64_t get_num;
+  uint64_t filter_num;
+  uint64_t get_file_slice_num;
+
+
+  TwoPCStatic();
+};
+
 }  // namespace rocksdb
 
 // Use TEST_SYNC_POINT to specify sync points inside code base.

@@ -18,6 +18,7 @@
 #include <string>
 #include <algorithm>
 #include <limits>
+#include <iostream>
 
 #include "db/compaction_picker.h"
 #include "db/compaction_picker_universal.h"
@@ -332,6 +333,7 @@ void SuperVersion::Init(MemTable* new_mem, MemTableListVersion* new_imm,
   mem = new_mem;
   imm = new_imm;
   current = new_current;
+  merge_tasks = new_merge_tasks;
   mem->Ref();
   imm->Ref();
   current->Ref();
@@ -838,7 +840,7 @@ void ColumnFamilyData::CreateNewMemtable(
 }
 
 bool ColumnFamilyData::NeedsCompaction() const {
-  return super_version_->merge_tasks.size() > 0 || 
+  return super_version_->merge_tasks->tasks.size() > 0 || 
       compaction_picker_->NeedsCompaction(current_->storage_info());
 }
 
@@ -846,18 +848,29 @@ Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options, LogBuffer* log_buffer) {
   Compaction* result = nullptr;
 
-  if (super_version_->merge_tasks.size() > 0) {
-    MergeTask* merge_task;
-    auto begin = super_version->merge_tasks->tasks.begin();
-    merge_task = *begin;
+  std::set<MergeTask*> del_tasks;
+  for (auto* merge_task : super_version_->merge_tasks->tasks) {
     result = compaction_picker_->MergeFileSlices(
-        merge_task, super_version->current->storage_info(), mutable_cf_options, ioptions());
-    super_version->merge_tasks->tasks.erase(begin);
-    delete merge_task;
-  }else {
+        merge_task, super_version_->current->storage_info(), mutable_options, *(ioptions()));
+    del_tasks.insert(merge_task);
+    if (result != nullptr) {
+      break;
+    }
+  }
+
+  for (auto* del_merge_task : del_tasks) {
+    super_version_->merge_tasks->tasks.erase(del_merge_task);
+    delete del_merge_task;
+  }
+
+  if (result == nullptr) {
+    std::cout << "ColumnFamilyData::PickCompaction : come to origin compaction" << std::endl;
     result = compaction_picker_->PickCompaction(
         GetName(), mutable_options, current_->storage_info(), log_buffer);
+  } else {
+    std::cout << "ColumnFamilyData::PickCompaction : come to merge" << std::endl;
   }
+
   if (result != nullptr) {
     result->SetInputVersion(current_);
   }

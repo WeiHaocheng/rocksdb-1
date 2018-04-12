@@ -12,6 +12,7 @@
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
+#include <iostream>
 
 #include "db/builder.h"
 #include "db/event_helpers.h"
@@ -23,6 +24,13 @@
 #include "util/sync_point.h"
 
 namespace rocksdb {
+//WEIHAOCHENG: 2pc debug
+void CheckFileSliceConsistency(FileMetaData* parent_file, InternalKey& slice_smallest_key, 
+    InternalKey& slice_largest_key, const InternalKeyComparator internal_comparator) {
+  assert(internal_comparator.Compare(parent_file->largest, slice_largest_key) >= 0);
+  assert(internal_comparator.Compare(parent_file->smallest, slice_smallest_key) <= 0);
+}
+
 Status DBImpl::SyncClosedLogs(JobContext* job_context) {
   TEST_SYNC_POINT("DBImpl::SyncClosedLogs:Start");
   mutex_.AssertHeld();
@@ -819,6 +827,7 @@ Status DBImpl::RunManualCompaction(ColumnFamilyData* cfd, int input_level,
   assert(input_level == ColumnFamilyData::kCompactAllLevels ||
          input_level >= 0);
 
+  std::cout << "DBImpl::RunManualCompaction" << std::endl;
   InternalKey begin_storage, end_storage;
   CompactionArg* ca;
 
@@ -1175,6 +1184,9 @@ void DBImpl::BGWorkCompaction(void* arg) {
       static_cast<PrepickedCompaction*>(ca.prepicked_compaction);
   reinterpret_cast<DBImpl*>(ca.db)->BackgroundCallCompaction(
       prepicked_compaction, Env::Priority::LOW);
+  if (prepicked_compaction != nullptr) {
+    std::cout << "DBImpl::BGWorkCompaction: prepicked_compaction != nullptr" << std::endl;
+  }
   delete prepicked_compaction;
 }
 
@@ -1447,6 +1459,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   unique_ptr<Compaction> c;
   if (prepicked_compaction != nullptr &&
       prepicked_compaction->compaction != nullptr) {
+    std::cout << "DBImpl::BackgroundCompaction manul compaction" << std::endl;
     c.reset(prepicked_compaction->compaction);
   }
   bool is_prepicked = is_manual || c;
@@ -1596,6 +1609,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:TrivialMove");
     // Instrument for event update
     // TODO(yhchiang): add op details for showing trivial-move.
+    std::cout << "DBImpl::BackgroundCompaction:TrivialMove" << std::endl;
     ThreadStatusUtil::SetColumnFamily(
         c->column_family_data(), c->column_family_data()->ioptions()->env,
         immutable_db_options_.enable_thread_tracking);
@@ -1678,49 +1692,79 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
     ++bg_bottom_compaction_scheduled_;
     env_->Schedule(&DBImpl::BGWorkBottomCompaction, ca, Env::Priority::BOTTOM,
                    this, &DBImpl::UnscheduleCallback);
-  } else if (c->input_level() >= 
-        c->column_family_data()->GetCurrentMutableCFOptions().compaction_options_2pc.start_level){
+  } else if (c->start_level() >= 
+        c->column_family_data()->GetCurrentMutableCFOptions()->compaction_options_2pc.start_level &&
+        !c->IsMergeCompaction()){
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:2PCLink");
+    std::cout << "DBImpl::BackgroundCompaction:2PCLink" << std::endl;
     ThreadStatusUtil::SetColumnFamily(
         c->column_family_data(), c->column_family_data()->ioptions()->env,
         immutable_db_options_.enable_thread_tracking);
     ThreadStatusUtil::SetThreadOperation(ThreadStatus::OP_COMPACTION);
 
-    const LevelFilesBrief* start_level_files = c->input_levels(c->start_level());
-    const LevelFilesBrief* output_level_files = c->input_levels(c->output_level());
-    int start_index = 0;
-    int output_index = 0;
+    const LevelFilesBrief* start_level_files = c->input_levels(0);
+    const LevelFilesBrief* output_level_files = c->input_levels(c->num_input_levels() - 1);
+    size_t start_index = 0;
+    size_t output_index = 0;
     bool is_contain_smallest = true;
+    auto cstart_smallest_key = start_level_files->files[0].file_metadata->smallest;
     while (start_index < start_level_files->num_files){
-      auto& cstart_smallest_key = start_level_files->files[start_index]->file_metadata->smallest_key;
-      auto& cstart_largest_key = start_level_files->files[start_index]->file_metadata->largest_key;
-      auto& coutput_largest_key = output_level_files->files[output_index]->file_metadata->largest_key;
+      auto cstart_largest_key = start_level_files->files[start_index].file_metadata->largest;
+      assert(c->column_family_data()->internal_comparator().Compare(cstart_smallest_key, cstart_largest_key) <= 0);
+      assert(c->column_family_data()->internal_comparator().Compare(cstart_smallest_key, start_level_files->files[start_index].file_metadata->smallest) >= 0);
+      auto coutput_largest_key = output_level_files->files[output_index].file_metadata->largest;
       int cmp = c->column_family_data()->internal_comparator().Compare(cstart_largest_key, coutput_largest_key);
       if (cmp > 0){
         // cut current start level file, interator output file
-        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
-          output_level_files->files[output_index]->fd, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
-        is_contain_smallest = false;
-        if (ouput_index + 1 < output_level_files->num_files) {
-          ouput_index++;
+        if (output_index + 1 < output_level_files->num_files) {
+          CheckFileSliceConsistency(start_level_files->files[start_index].file_metadata, cstart_smallest_key, coutput_largest_key, c->column_family_data()->internal_comparator());
+            c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index].file_metadata,
+              output_level_files->files[output_index].file_metadata, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
+          is_contain_smallest = false;
+          if (c->column_family_data()->internal_comparator().Compare(cstart_smallest_key, coutput_largest_key) < 0){
+            //CheckFileSliceConsistency(start_level_files->files[start_index].file_metadata, cstart_smallest_key, coutput_largest_key, c->column_family_data()->internal_comparator());
+            //c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index].fd,
+              //output_level_files->files[output_index].fd, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
+            //is_contain_smallest = false;
+            cstart_smallest_key = coutput_largest_key;
+          }
+          output_index++;
+        }else {
+          CheckFileSliceConsistency(start_level_files->files[start_index].file_metadata, cstart_smallest_key, cstart_largest_key, c->column_family_data()->internal_comparator());
+          c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index].file_metadata,
+            output_level_files->files[output_index].file_metadata, cstart_smallest_key, cstart_largest_key, is_contain_smallest);
+          c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index].file_metadata);
+          is_contain_smallest = true;
+          start_index++;
+          if (start_index < start_level_files->num_files) {
+            cstart_smallest_key = start_level_files->files[start_index].file_metadata->smallest;
+          }
         }
-      }else if(cmp == 0){
+      }else if (cmp == 0){
         // iterate start level file and output level file
-        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
-          output_level_files->files[output_index]->fd, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
-        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index]->file_metadata);
+        CheckFileSliceConsistency(start_level_files->files[start_index].file_metadata, cstart_smallest_key, coutput_largest_key, c->column_family_data()->internal_comparator());
+        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index].file_metadata,
+          output_level_files->files[output_index].file_metadata, cstart_smallest_key, coutput_largest_key, is_contain_smallest);
+        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index].file_metadata);
         is_contain_smallest = true;
-        if (ouput_index + 1 < output_level_files->num_files) {
-          ouput_index++;
+        if (output_index + 1 < output_level_files->num_files) {
+          output_index++;
         }
         start_index++;
+        if (start_index < start_level_files->num_files) {
+          cstart_smallest_key = start_level_files->files[start_index].file_metadata->smallest;
+        }
       }else{  // cmp < 0
         // iterate start level file
-        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index]->fd,
-          output_level_files->files[output_index]->fd, cstart_smallest_key, cstart_largest_key, is_contain_smallest);
-        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index]->file_metadata);
+        CheckFileSliceConsistency(start_level_files->files[start_index].file_metadata, cstart_smallest_key, cstart_largest_key, c->column_family_data()->internal_comparator());
+        c->edit()->AddFileSlice(c->start_level(), c->output_level(), start_level_files->files[start_index].file_metadata,
+          output_level_files->files[output_index].file_metadata, cstart_smallest_key, cstart_largest_key, is_contain_smallest);
+        c->edit()->MoveFileFrozen(c->start_level(), start_level_files->files[start_index].file_metadata);
         is_contain_smallest = true;
         start_index++;
+        if (start_index < start_level_files->num_files){
+          cstart_smallest_key = start_level_files->files[start_index].file_metadata->smallest;
+        }
       }
     }
 
@@ -1734,11 +1778,14 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
 
     // Clear Instrument
     ThreadStatusUtil::ResetThreadStatus();
+    std::cout << "DBImpl::BackgroundCompaction:2PCLink end" << std::endl;
   }else {
     int output_level  __attribute__((unused));
     output_level = c->output_level();
+    std::cout << "DBImpl::BackgroundCompaction:NonTrivial start level:" <<  c->start_level() << std::endl;
     TEST_SYNC_POINT_CALLBACK("DBImpl::BackgroundCompaction:NonTrivial",
                              &output_level);
+    std::cout << "DBImpl::BackgroundCompaction:NonTrivial" << std::endl;
     SequenceNumber earliest_write_conflict_snapshot;
     std::vector<SequenceNumber> snapshot_seqs =
         snapshots_.GetAll(&earliest_write_conflict_snapshot);

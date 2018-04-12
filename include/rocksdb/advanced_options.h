@@ -554,7 +554,7 @@ struct AdvancedColumnFamilyOptions {
   // to the higher level.
   //
   // Default: false
-  bool optimize_filters_for_hits = false;
+  bool optimize_filters_for_hits = true;
 
   // After writing every SST file, reopen it and read all the keys.
   // Default: false

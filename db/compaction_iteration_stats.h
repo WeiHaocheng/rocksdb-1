@@ -12,7 +12,9 @@ struct CompactionIterationStats {
   // CompactionFilter::Decision::kRemoveAndSkipUntil.
   int64_t num_record_drop_user = 0;
 
-  int64_t num_record_drop_hidden = 0;
+  int64_t num_record_drop_hidden1 = 0;
+  int64_t num_record_drop_hidden2 = 0;
+  int64_t num_record_drop_hidden3 = 0;
   int64_t num_record_drop_obsolete = 0;
   int64_t num_record_drop_range_del = 0;
   int64_t num_range_del_drop_obsolete = 0;
@@ -32,4 +34,7 @@ struct CompactionIterationStats {
   // Single-Delete diagnostics for exceptional situations
   uint64_t num_single_del_fallthru = 0;
   uint64_t num_single_del_mismatch = 0;
+
+  //WEIHAOCHENG ADD
+  uint64_t num_qual_with_pre = 0;
 };

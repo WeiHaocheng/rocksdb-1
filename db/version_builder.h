@@ -17,6 +17,7 @@ class VersionStorageInfo;
 class VersionEdit;
 struct FileMetaData;
 class InternalStats;
+class SuperVersion;
 
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
@@ -24,7 +25,7 @@ class InternalStats;
 class VersionBuilder {
  public:
   VersionBuilder(const EnvOptions& env_options, TableCache* table_cache,
-                 VersionStorageInfo* base_vstorage, Logger* info_log = nullptr);
+                 VersionStorageInfo* base_vstorage, Logger* info_log = nullptr, SuperVersion* super_version = nullptr);
   ~VersionBuilder();
   void CheckConsistency(VersionStorageInfo* vstorage);
   void CheckConsistencyForDeletes(VersionEdit* edit, uint64_t number,
@@ -35,9 +36,10 @@ class VersionBuilder {
   void LoadTableHandlers(InternalStats* internal_stats, int max_threads,
                          bool prefetch_index_and_filter_in_cache);
   void MaybeAddFile(VersionStorageInfo* vstorage, int level, FileMetaData* f);
+  class Rep;
 
  private:
-  class Rep;
+  //class Rep;
   Rep* rep_;
 };
 

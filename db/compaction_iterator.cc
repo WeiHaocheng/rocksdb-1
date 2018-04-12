@@ -9,6 +9,7 @@
 #include "port/likely.h"
 #include "rocksdb/listener.h"
 #include "table/internal_iterator.h"
+#include <iostream>
 
 namespace rocksdb {
 
@@ -96,6 +97,7 @@ CompactionIterator::CompactionIterator(
     level_ptrs_ = std::vector<size_t>(compaction_->number_levels(), 0);
   }
 
+  std::cout << "CompactionIterator::CompactionIterator: snapshots_->size()" << snapshots_->size() << std::endl;
   if (snapshots_->size() == 0) {
     // optimize for fast path if there are no snapshots
     visible_at_tip_ = true;
@@ -123,11 +125,14 @@ CompactionIterator::~CompactionIterator() {
 
 void CompactionIterator::ResetRecordCounts() {
   iter_stats_.num_record_drop_user = 0;
-  iter_stats_.num_record_drop_hidden = 0;
+  iter_stats_.num_record_drop_hidden1 = 0;
+  iter_stats_.num_record_drop_hidden2 = 0;
+  iter_stats_.num_record_drop_hidden3 = 0;
   iter_stats_.num_record_drop_obsolete = 0;
   iter_stats_.num_record_drop_range_del = 0;
   iter_stats_.num_range_del_drop_obsolete = 0;
   iter_stats_.num_optimized_del_drop_obsolete = 0;
+  iter_stats_.num_qual_with_pre = 0;
 }
 
 void CompactionIterator::SeekToFirst() {
@@ -307,6 +312,7 @@ void CompactionIterator::NextFromInput() {
         InvokeFilterIfNeeded(&need_skip, &skip_until);
       }
     } else {
+      iter_stats_.num_qual_with_pre++;
 #ifndef ROCKSDB_LITE
       if (compaction_listener_) {
         compaction_listener_->OnCompaction(compaction_->level(), ikey_.user_key,
@@ -447,7 +453,7 @@ void CompactionIterator::NextFromInput() {
               ++iter_stats_.num_single_del_mismatch;
             }
 
-            ++iter_stats_.num_record_drop_hidden;
+            ++iter_stats_.num_record_drop_hidden1;
             ++iter_stats_.num_record_drop_obsolete;
             // Already called input_->Next() once.  Call it a second time to
             // skip past the second key.
@@ -513,7 +519,7 @@ void CompactionIterator::NextFromInput() {
       // checking since there has already been a record returned for this key
       // in this snapshot.
       assert(last_sequence >= current_user_key_sequence_);
-      ++iter_stats_.num_record_drop_hidden;  // (A)
+      ++iter_stats_.num_record_drop_hidden2;  // (A)
       input_->Next();
     } else if (compaction_ != nullptr && ikey_.type == kTypeDeletion &&
                ikey_.sequence <= earliest_snapshot_ &&
@@ -597,7 +603,7 @@ void CompactionIterator::NextFromInput() {
       bool should_delete = range_del_agg_->ShouldDelete(
           key_, RangeDelAggregator::RangePositioningMode::kForwardTraversal);
       if (should_delete) {
-        ++iter_stats_.num_record_drop_hidden;
+        ++iter_stats_.num_record_drop_hidden3;
         ++iter_stats_.num_record_drop_range_del;
         input_->Next();
       } else {

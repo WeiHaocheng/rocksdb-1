@@ -61,6 +61,7 @@ if is_opt_mode:
 cpp_library(
     name = "rocksdb_lib",
     srcs = [
+        "options/two_pc_compaction.cc",
         "cache/clock_cache.cc",
         "cache/lru_cache.cc",
         "cache/sharded_cache.cc",
@@ -181,6 +182,7 @@ cpp_library(
         "table/sst_file_writer.cc",
         "table/table_properties.cc",
         "table/two_level_iterator.cc",
+        "table/file_slice_iterator.cc"
         "tools/dump/db_dump_tool.cc",
         "tools/ldb_cmd.cc",
         "tools/ldb_tool.cc",

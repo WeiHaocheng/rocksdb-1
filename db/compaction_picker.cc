@@ -18,6 +18,7 @@
 #include <queue>
 #include <string>
 #include <utility>
+#include <iostream>
 #include "db/column_family.h"
 #include "monitoring/statistics.h"
 #include "util/filename.h"
@@ -81,6 +82,9 @@ CompressionType GetCompressionType(const ImmutableCFOptions& ioptions,
                                    const MutableCFOptions& mutable_cf_options,
                                    int level, int base_level,
                                    const bool enable_compression) {
+  //WEIHAOCHENG DEBUG
+  return kNoCompression;
+
   if (!enable_compression) {
     // disable compression
     return kNoCompression;
@@ -280,7 +284,7 @@ bool CompactionPicker::ExpandInputsToCleanCut(const std::string& cf_name,
     vstorage->GetOverlappingInputs(level, &smallest, &largest, &inputs->files,
                                    hint_index, &hint_index);
   } while (inputs->size() > old_size);
-
+  //std::cout << "CompactionPicker::ExpandInputsToCleanCut:inputs->size()" << inputs->size() << std::endl;
   // we started off with inputs non-empty and the previous loop only grew
   // inputs. thus, inputs should be non-empty here
   assert(!inputs->empty());
@@ -291,9 +295,11 @@ bool CompactionPicker::ExpandInputsToCleanCut(const std::string& cf_name,
     return false;
   }
 
+  /*
   if (AreFilesWithSlice(inputs->files)) {
     return false;
   }
+  */
   return true;
 }
 
@@ -358,7 +364,7 @@ Compaction* CompactionPicker::CompactFiles(
     const CompactionOptions& compact_options,
     const std::vector<CompactionInputFiles>& input_files, int output_level,
     VersionStorageInfo* vstorage, const MutableCFOptions& mutable_cf_options,
-    uint32_t output_path_id) {
+    uint32_t output_path_id, bool manual_call) {
   assert(input_files.size());
   // This compaction output should not overlap with a running compaction as
   // `SanitizeCompactionInputFiles` should've checked earlier and db mutex
@@ -369,25 +375,50 @@ Compaction* CompactionPicker::CompactFiles(
       new Compaction(vstorage, ioptions_, mutable_cf_options, input_files,
                      output_level, compact_options.output_file_size_limit,
                      mutable_cf_options.max_compaction_bytes, output_path_id,
-                     compact_options.compression, /* grandparents */ {}, true);
+                     compact_options.compression, /* grandparents */ {}, manual_call);
   RegisterCompaction(c);
   return c;
 }
 
 Compaction* CompactionPicker::MergeFileSlices(
-    MergeTask& merge_task,
+    MergeTask* merge_task,
     VersionStorageInfo* vstorage, const MutableCFOptions& mutable_cf_options,
     const ImmutableCFOptions& ioptions) {
-    const CompactionOptions compact_options;
+    CompactionOptions compact_options;
     std::vector<CompactionInputFiles> input_files;
     CompactionInputFiles level_input_files;
     level_input_files.level = merge_task->level;
-    vstorage->GetOverlappingInputs(merge_task->level, merge_task->smallest_key, merge_task->largest_key,
-      &(level_input_files.files), -1, nullptr, false, false);
+    compact_options.output_file_size_limit = mutable_cf_options.MaxFileSizeForLevel(merge_task->level);
+    compact_options.compression = kNoCompression;
+    std::cout << "CompactionPicker::MergeFileSlices compact_options.output_file_size_limit:" << compact_options.output_file_size_limit << std::endl; 
+    vstorage->GetOverlappingInputs(merge_task->level, &(merge_task->smallest_key), &(merge_task->largest_key),
+      &(level_input_files.files), -1, nullptr, false, true);
+    
+    if (level_input_files.files.size() != 1) {
+      std::cout << "merge_task->smallest_key:" << merge_task->smallest_key.DebugString(true).c_str() <<
+        " merge_task->largest_key:" << merge_task->largest_key.DebugString(true).c_str() << std::endl;
+      for (auto* f : level_input_files.files) {
+        std::cout << "f->smallest_key:" << f->smallest.DebugString(true).c_str() <<
+          " f->largest_key:" << f->largest.DebugString(true).c_str() << std::endl;
+      }
+      //assert(level_input_files.files.size() == 1);
+    }
+
+    // double check
+    int file_slices_num = 0;
+    for (auto* file_meta : level_input_files.files) {
+      file_slices_num += file_meta->file_slices.size();
+    }
+
+    if (file_slices_num / level_input_files.files.size() 
+      > mutable_cf_options.compaction_options_2pc.merge_threshold) {
     input_files.push_back(level_input_files);
     return CompactFiles(std::move(compact_options), std::move(input_files), 
-      output_level, vstorage, mutable_cf_options, 
-      GetPathId(ioptions, mutable_cf_options_, output_level_));
+      merge_task->level, vstorage, mutable_cf_options, 
+      GetPathId(ioptions, mutable_cf_options, merge_task->level), false);
+    } else {
+      return nullptr;
+    }
 
 }
 
@@ -467,7 +498,7 @@ bool CompactionPicker::SetupOtherInputs(
     const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
     VersionStorageInfo* vstorage, CompactionInputFiles* inputs,
     CompactionInputFiles* output_level_inputs, int* parent_index,
-    int base_index) {
+    int base_index, bool two_pc) {
   assert(!inputs->empty());
   assert(output_level_inputs->empty());
   const int input_level = inputs->level;
@@ -500,6 +531,11 @@ bool CompactionPicker::SetupOtherInputs(
     if (!ExpandInputsToCleanCut(cf_name, vstorage, output_level_inputs)) {
       return false;
     }
+  }
+
+  //WEIHAOCHENG:2pc directly return
+  if (two_pc && input_level >= mutable_cf_options.compaction_options_2pc.start_level) {
+    return true;
   }
 
   // See if we can further grow the number of inputs in "level" without
@@ -1096,7 +1132,7 @@ class LevelCompactionBuilder {
   void PickFilesMarkedForCompaction();
 
   // WEIHAOCHENG: 2PC check if the file has file slices
-  bool LevelCompactionBuilder::WithFileSlices(CompactionInputFiles& inputs) const;
+  bool WithFileSlices(CompactionInputFiles& inputs) const;
 
   const std::string& cf_name_;
   VersionStorageInfo* vstorage_;
@@ -1196,6 +1232,7 @@ void LevelCompactionBuilder::SetupInitialFiles() {
         break;
       } else {
         // didn't find the compaction, clear the inputs
+        std::cout << "!!! LevelCompactionBuilder::SetupInitialFiles clear start_level:" << start_level_ << std::endl;
         start_level_inputs_.clear();
         if (start_level_ == 0) {
           skipped_l0_to_base = true;
@@ -1273,7 +1310,6 @@ bool LevelCompactionBuilder::SetupOtherL0FilesIfNeeded() {
     }
   }
   assert(!start_level_inputs_.files.empty());
-
   return true;
 }
 
@@ -1283,11 +1319,9 @@ bool LevelCompactionBuilder::SetupOtherInputsIfNeeded() {
   // need to consider other levels.
   if (output_level_ != 0) {
     output_level_inputs_.level = output_level_;
-    //WEIHAOCHENG:2PC do not support compaction_picker_->SetupOtherInputs
-    if (start_levev_ < mutable_cf_options_.compaction_options_2pc.start_level && 
-        !compaction_picker_->SetupOtherInputs(
+    if ( !compaction_picker_->SetupOtherInputs(
             cf_name_, mutable_cf_options_, vstorage_, &start_level_inputs_,
-            &output_level_inputs_, &parent_index_, base_index_)) {
+            &output_level_inputs_, &parent_index_, base_index_, true/*2pc*/)) {
       return false;
     }
 
@@ -1422,13 +1456,12 @@ uint32_t LevelCompactionBuilder::GetPathId(
   return p;
 }
 
-bool LevelCompactionBuilder::WithFileSlices(CompactionInputFiles& inputs) const{ 
+bool LevelCompactionBuilder::WithFileSlices(CompactionInputFiles& inputs) const { 
   for(auto it = inputs.files.begin(); it != inputs.files.end(); it++){
-    if (it->file_slices.size() > 0){
+    if ((*it)->file_slices.size() > 0){
       return true;
     }
   }
-
   return false;
 }
 
@@ -1463,6 +1496,7 @@ bool LevelCompactionBuilder::PickFileToCompact() {
     // do not pick a file to compact if it is being compacted
     // from n-1 level.
     if (f->being_compacted) {
+      std::cout << "LevelCompactionBuilder::PickFileToCompact start_level:" << start_level_ << " skip being_compacted" << std::endl;
       continue;
     }
 
@@ -1480,10 +1514,11 @@ bool LevelCompactionBuilder::PickFileToCompact() {
                                                     &start_level_inputs_) ||
         compaction_picker_->FilesRangeOverlapWithCompaction(
             {start_level_inputs_}, output_level_) || 
-        (start_levev_ >= mutable_cf_options_.compaction_options_2pc.start_level 
+        (start_level_ >= mutable_cf_options_.compaction_options_2pc.start_level 
           && WithFileSlices(start_level_inputs_))) {
       // A locked (pending compaction) input-level file was pulled in due to
       // user-key overlap.
+      std::cout << "LevelCompactionBuilder::PickFileToCompact start_level:" << start_level_ << " with file slice" << std::endl;
       start_level_inputs_.clear();
       continue;
     }
@@ -1500,10 +1535,12 @@ bool LevelCompactionBuilder::PickFileToCompact() {
     output_level_inputs.level = output_level_;
     vstorage_->GetOverlappingInputs(output_level_, &smallest, &largest,
                                     &output_level_inputs.files, -1, nullptr, true, true);
+    
     if (!output_level_inputs.empty() &&
         !compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                     &output_level_inputs)) {
       start_level_inputs_.clear();
+      std::cout << "LevelCompactionBuilder::PickFileToCompact start_level:" << start_level_ << " position 3" << std::endl;
       continue;
     }
     base_index_ = index;
@@ -1512,7 +1549,6 @@ bool LevelCompactionBuilder::PickFileToCompact() {
 
   // store where to start the iteration in the next call to PickCompaction
   vstorage_->SetNextCompactionIndex(start_level_, cmp_idx);
-
   return start_level_inputs_.size() > 0;
 }
 

@@ -15,6 +15,7 @@
 
 #include <inttypes.h>
 #include <vector>
+#include <iostream>
 
 #include "db/column_family.h"
 #include "rocksdb/compaction_filter.h"
@@ -259,6 +260,10 @@ bool Compaction::IsTrivialMove() const {
   return true;
 }
 
+bool Compaction::IsMergeCompaction() const {
+  return (start_level_ == output_level_ && num_input_levels() == 1 && start_level_ != 0);
+}
+
 void Compaction::AddInputDeletions(VersionEdit* out_edit) {
   for (size_t which = 0; which < num_input_levels(); which++) {
     for (size_t i = 0; i < inputs_[which].size(); i++) {
@@ -303,6 +308,10 @@ bool Compaction::KeyNotExistsBeyondOutputLevel(
 void Compaction::MarkFilesBeingCompacted(bool mark_as_compacted) {
   for (size_t i = 0; i < num_input_levels(); i++) {
     for (size_t j = 0; j < inputs_[i].size(); j++) {
+      //if (start_level_ != 0){
+        //std::cout << "!!! Compaction::MarkFilesBeingCompacted i:" << i 
+          //<< " j:" << j << "mark_as_compacted:" << mark_as_compacted << std::endl;
+      //}
       assert(mark_as_compacted ? !inputs_[i][j]->being_compacted
                                : inputs_[i][j]->being_compacted);
       inputs_[i][j]->being_compacted = mark_as_compacted;
