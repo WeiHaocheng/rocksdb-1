@@ -1073,9 +1073,9 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   }
   uint64_t duration = env_->NowMicros() - start_time;
   if (duration >= 1000) {
-    rocksdb::TwoPCStatic::GetInstance()->read_delay[100] ++;
+    rocksdb::TwoPCStatic::GetInstance()->read_delay[100]++;
   } else {
-    rocksdb::TwoPCStatic::GetInstance()->read_delay[duration/10] ++;
+    rocksdb::TwoPCStatic::GetInstance()->read_delay[duration/10]++;
   }
   return s;
 }

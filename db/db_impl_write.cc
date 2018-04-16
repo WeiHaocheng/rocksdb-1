@@ -383,9 +383,9 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
 
   uint64_t duration = env_->NowMicros() - start_time;
   if (duration >= 1000) {
-    rocksdb::TwoPCStatic::GetInstance()->write_delay[100] ++;
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[100]++;
   } else {
-    rocksdb::TwoPCStatic::GetInstance()->write_delay[duration/10] ++;
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[duration/10]++;
   }
   return status;
 }
@@ -395,6 +395,7 @@ Status DBImpl::PipelinedWriteImpl(const WriteOptions& write_options,
                                   uint64_t* log_used, uint64_t log_ref,
                                   bool disable_memtable, uint64_t* seq_used) {
   PERF_TIMER_GUARD(write_pre_and_post_process_time);
+  uint64_t start_time = env_->NowMicros();
   StopWatch write_sw(env_, immutable_db_options_.statistics.get(), DB_WRITE);
 
   WriteContext write_context;
@@ -514,6 +515,12 @@ Status DBImpl::PipelinedWriteImpl(const WriteOptions& write_options,
   }
 
   assert(w.state == WriteThread::STATE_COMPLETED);
+  uint64_t duration = env_->NowMicros() - start_time;
+  if (duration >= 1000) {
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[100]++;
+  } else {
+    rocksdb::TwoPCStatic::GetInstance()->write_delay[duration/10]++;
+  }
   return w.FinalStatus();
 }
 
