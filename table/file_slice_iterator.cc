@@ -78,7 +78,7 @@ void FileSliceIterator::Seek(const Slice& target) {
 
 void FileSliceIterator::SeekToFirst() {
 	file_iter_->Seek(file_slice_.smallest.Encode());
-	if (!file_slice_.is_contain_smallest && icmp_.Compare(file_iter_->key(), file_slice_.smallest.Encode()) == 0) {
+	if (!file_slice_.is_contain_smallest && file_iter_->Valid() && icmp_.Compare(file_iter_->key(), file_slice_.smallest.Encode()) == 0) {
 		file_iter_->Next();
 	}
 }

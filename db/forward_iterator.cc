@@ -86,6 +86,8 @@ class LevelIterator : public InternalIterator {
           read_options_.ignore_range_deletions ? nullptr : &range_del_agg,
           nullptr /* don't need reference to table */, nullptr,
           false);
+      //assert(cfd_->internal_comparator()->Compare(files_[file_index_]->file_slices[file_slice_size - 1 - i].smallest, 
+          //files_[file_index_]->file_slices[file_slice_size - 1 - i].parent_file_meta->largest) <= 0);
       list[num++] = static_cast<InternalIterator*>(new FileSliceIterator(files_[file_index_]->file_slices[file_slice_size - 1 - i], file_iter, cfd_->internal_comparator()));
     }
 
