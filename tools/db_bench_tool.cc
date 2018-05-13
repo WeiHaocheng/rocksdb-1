@@ -84,7 +84,8 @@ DEFINE_string(
     benchmarks,
     //"fillseq,",
     "fillrandom,"
-    "readrandom,",
+    //"readrandom,",
+    "readseq,",
     /*
     "fillseqdeterministic,"
     "fillsync,"
@@ -4009,6 +4010,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
                                                    RateLimiter::OpType::kRead);
       }
     }
+
+    std::cout << "db_bench ReadSequential i:" << i << std::endl;
 
     delete iter;
     thread->stats.AddBytes(bytes);

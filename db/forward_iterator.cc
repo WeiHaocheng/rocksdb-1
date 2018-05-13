@@ -19,6 +19,7 @@
 #include "rocksdb/slice.h"
 #include "rocksdb/slice_transform.h"
 #include "table/merging_iterator.h"
+#include "table/file_slice_iterator.h"
 #include "util/string_util.h"
 #include "util/sync_point.h"
 
@@ -71,11 +72,31 @@ class LevelIterator : public InternalIterator {
 
     RangeDelAggregator range_del_agg(
         cfd_->internal_comparator(), {} /* snapshots */);
-    file_iter_ = cfd_->table_cache()->NewIterator(
+
+    int space = files_[file_index_]->file_slices.size() + 1;
+    InternalIterator** list = new InternalIterator* [space];
+    int num = 0;
+
+    size_t file_slice_size = files_[file_index_]->file_slices.size();
+    for(size_t i = 0; i < file_slice_size; i++){
+      InternalIterator* file_iter = 
+        cfd_->table_cache()->NewIterator(
+          read_options_, *(cfd_->soptions()), cfd_->internal_comparator(), 
+          files_[file_index_]->file_slices[file_slice_size - 1 - i].parent_file_meta->fd, 
+          read_options_.ignore_range_deletions ? nullptr : &range_del_agg,
+          nullptr /* don't need reference to table */, nullptr,
+          false);
+      list[num++] = static_cast<InternalIterator*>(new FileSliceIterator(files_[file_index_]->file_slices[file_slice_size - 1 - i], file_iter, cfd_->internal_comparator()));
+    }
+
+    list[num++] = cfd_->table_cache()->NewIterator(
         read_options_, *(cfd_->soptions()), cfd_->internal_comparator(),
         files_[file_index_]->fd,
         read_options_.ignore_range_deletions ? nullptr : &range_del_agg,
         nullptr /* table_reader_ptr */, nullptr, false);
+    
+    file_iter_ = NewMergingIterator(&(cfd_->internal_comparator()), list, static_cast<int>(num));
+    delete[] list;
     file_iter_->SetPinnedItersMgr(pinned_iters_mgr_);
     if (!range_del_agg.IsEmpty()) {
       status_ = Status::NotSupported(

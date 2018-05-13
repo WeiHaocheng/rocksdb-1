@@ -578,11 +578,14 @@ class LevelFileIteratorState : public TwoLevelIteratorState {
     InternalIterator** list = new InternalIterator* [space];
     int num = 0;
     for(size_t i = 0; i < file_meta->file_slices.size(); i++){
-      std::cout << "NewSecondaryIterator : gernerate file slice iterator, slice_smallest:" << file_meta->file_slices[i].smallest.DebugString(true).c_str()
-        << " slice_largest" << file_meta->file_slices[i].largest.DebugString(true).c_str() << std::endl;
+      std::cout << "NewSecondaryIterator : gernerate file slice iterator, slice_smallest:" 
+        << file_meta->file_slices[file_meta->file_slices.size() - 1 - i].smallest.DebugString(true).c_str()
+        << " slice_largest" 
+        << file_meta->file_slices[file_meta->file_slices.size() - 1 - i].largest.DebugString(true).c_str() << std::endl;
       InternalIterator* file_iter = 
         table_cache_->NewIterator(
-          read_options_, env_options_, icomparator_, file_meta->file_slices[i].parent_file_meta->fd, range_del_agg_,
+          read_options_, env_options_, icomparator_, 
+          file_meta->file_slices[file_meta->file_slices.size() - 1 - i].parent_file_meta->fd, range_del_agg_,
           nullptr /* don't need reference to table */, file_read_hist_,
           for_compaction_, nullptr /* arena */, true/*skip_filters_*/, -1/*not set*/);
       list[num++] = static_cast<InternalIterator*>(new FileSliceIterator(file_meta->file_slices[i], file_iter, icomparator_));
