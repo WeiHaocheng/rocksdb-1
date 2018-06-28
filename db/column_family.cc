@@ -848,6 +848,7 @@ Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options, LogBuffer* log_buffer) {
   Compaction* result = nullptr;
 
+  // WEIHAOCHENG: modify to generate merge
   std::set<MergeTask*> del_tasks;
   for (auto* merge_task : super_version_->merge_tasks->tasks) {
     result = compaction_picker_->MergeFileSlices(

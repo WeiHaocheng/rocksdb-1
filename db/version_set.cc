@@ -327,7 +327,7 @@ Version::~Version() {
   prev_->next_ = next_;
   next_->prev_ = prev_;
 
-  // Drop references to frozen files
+  // WEIHAOCHENG: Drop references to frozen files
   for (auto* file_meta : *(storage_info_.frozen_files_)) {
     assert(file_meta->refs > 0);
     file_meta->refs--;
@@ -577,6 +577,7 @@ class LevelFileIteratorState : public TwoLevelIteratorState {
     int space = file_meta->file_slices.size() + 1;
     InternalIterator** list = new InternalIterator* [space];
     int num = 0;
+    // WEIHAOCHENG: MergingIterator with sstable and fileSlice
     for(size_t i = 0; i < file_meta->file_slices.size(); i++){
       std::cout << "NewSecondaryIterator : gernerate file slice iterator, slice_smallest:" 
         << file_meta->file_slices[file_meta->file_slices.size() - 1 - i].smallest.DebugString(true).c_str()
@@ -1068,6 +1069,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   while (f != nullptr) {
     size_t slices_num = f->file_metadata->file_slices.size();
     for (size_t slice_index = 0; slice_index < slices_num + 1; slice_index++) {
+      // WEIHAOCHENG:add for 2PC
       //TODO:WEIHAOCHENG should modify sample
       if (get_context.sample()) {
         sample_file_read_inc(f->file_metadata);
@@ -1635,7 +1637,7 @@ void VersionStorageInfo::AddFile(int level, FileMetaData* f, Logger* info_log) {
 
   }
 
-  // Must not overlap
+  // WEIHAOCHENG Must not overlap
 #ifndef NDEBUG
   if (!level_files->empty()) {
     FileMetaData* pre_file = (*level_files)[level_files->size() - 1];

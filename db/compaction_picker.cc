@@ -380,6 +380,7 @@ Compaction* CompactionPicker::CompactFiles(
   return c;
 }
 
+// WEIHAOCHENG:add for 2PC
 Compaction* CompactionPicker::MergeFileSlices(
     MergeTask* merge_task,
     VersionStorageInfo* vstorage, const MutableCFOptions& mutable_cf_options,
@@ -1510,6 +1511,8 @@ bool LevelCompactionBuilder::PickFileToCompact() {
 
     start_level_inputs_.files.push_back(f);
     start_level_inputs_.level = start_level_;
+
+    //// WEIHAOCHENG:modify condition for 2PC
     if (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                     &start_level_inputs_) ||
         compaction_picker_->FilesRangeOverlapWithCompaction(

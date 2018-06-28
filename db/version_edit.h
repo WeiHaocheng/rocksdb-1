@@ -119,6 +119,7 @@ struct FileMetaData {
   bool marked_for_compaction;  // True if client asked us nicely to compact this
                                // file.
 
+  // WEIHAOCHENG:add for 2PC
   std::vector<FileSlice> file_slices;  // WEIHAOCHENG:add for 2PC
   int slice_refs;  //debug
 
@@ -235,6 +236,7 @@ class VersionEdit {
     new_files_.emplace_back(level, std::move(f));
   }
 
+// WEIHAOCHENG:add for 2PC
   void AddFileSlice(int start_level, int output_level, FileMetaData* start_level_file, 
                FileMetaData* output_level_file, const InternalKey& smallest,
                const InternalKey& largest, bool is_contain_smallest){

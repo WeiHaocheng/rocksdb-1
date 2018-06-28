@@ -1695,6 +1695,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   } else if (c->start_level() >= 
         c->column_family_data()->GetCurrentMutableCFOptions()->compaction_options_2pc.start_level &&
         !c->IsMergeCompaction()){
+    // WEIHAOCHENG:add for 2PC Link
     TEST_SYNC_POINT("DBImpl::BackgroundCompaction:2PCLink");
     std::cout << "DBImpl::BackgroundCompaction:2PCLink" << std::endl;
     ThreadStatusUtil::SetColumnFamily(

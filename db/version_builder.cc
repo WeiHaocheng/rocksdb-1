@@ -270,7 +270,7 @@ class VersionBuilder::Rep {
   void Apply(VersionEdit* edit) {
     CheckConsistency(base_vstorage_);
 
-    // Move files to Frozen Region
+    // WEIHAOCHENG:add for 2PC Move files to Frozen Region
     auto& mov = edit->GetMovedFiles();
     for (const auto& mov_file : mov) {
       const auto level = mov_file.first;
@@ -284,7 +284,7 @@ class VersionBuilder::Rep {
       }
     }
 
-    //Add file slice
+    //WEIHAOCHENG:add for 2PC Add file slice
     const auto& file_slices = edit->GetNewFileSlice();
     for(const auto& file_slice : file_slices){
       const auto level = file_slice.first;
@@ -408,6 +408,7 @@ class VersionBuilder::Rep {
       std::cout << "SaveTo level:" << level << " file nums:" << vstorage->NumLevelFiles(level) << std::endl;
     }
 
+    // WEIHAOCHENG: Cooy old version's frozen file and drop the file with 0 ref
     for (auto* file_meta : *(base_vstorage_->GetFrozenFiles())) {
       if (file_meta->slice_refs > 0) {
         vstorage->GetFrozenFiles()->insert(file_meta);
@@ -473,6 +474,7 @@ class VersionBuilder::Rep {
                     FileMetaData** last_file) {
     if (levels_[level].deleted_files.count(f->fd.GetNumber()) > 0) {
       // f is to-be-delected table file
+      // WEIHAOCHENG: unref file slice
       for (auto fs : f->file_slices) {
         fs.parent_file_meta->slice_refs--;
         std::cout << "MaybeAddFile dec slice_refs:" << fs.parent_file_meta->slice_refs << std::endl;
@@ -481,12 +483,14 @@ class VersionBuilder::Rep {
 
       vstorage->RemoveCurrentStats(f);
     } else if (levels_[level].added_frozen_files.count(f) > 0) {
+      // WEIHAOCHENG:add for 2PC
       vstorage->AddFrozenFile(level, f->fd.GetNumber(), f);
       // f is to-be-moved to frozenfile ?
       assert(f->file_slices.size() == 0);
       vstorage->RemoveCurrentStats(f);
       std::cout << "MaybeAddFile AddFrozenFile" << std::endl;
     }else {
+      // WEIHAOCHENG:add for 2PC
       vstorage->AddFile(level, f, info_log_);
       auto iter_begin = levels_[level].added_file_slices.lower_bound(f->fd.GetNumber());
       auto iter_end = levels_[level].added_file_slices.upper_bound(f->fd.GetNumber());
@@ -495,12 +499,13 @@ class VersionBuilder::Rep {
         vstorage->AddFileSlice(level, f, iter->second, *last_file, info_log_);
         add_file_slices = true;
       }
-      //WEIAHOCHENG:TODO change in options
+      // WEIAHOCHENG:TODO change in options
       if (add_file_slices) {
         std::cout << "MaybeAddFile f->file_slices.size()=" << f->file_slices.size() << std::endl;
       }
       if (add_file_slices && f->file_slices.size() > 
           super_version_->mutable_cf_options.compaction_options_2pc.merge_threshold){
+        // WEIAHOCHENG: generate merge_task
         MergeTask* merge_task = new MergeTask(level, f->smallest, f->largest);
         super_version_->merge_tasks->tasks.insert(merge_task);
       }
